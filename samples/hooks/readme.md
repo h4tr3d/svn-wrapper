@@ -1,0 +1,1 @@
+Put this directory to the `.svn` to enable local hooks

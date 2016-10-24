@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+
+set -e
+
+#
+# Copyright (c) 2013 Baptiste Daroussin <bapt@FreeBSD.org>
+# All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+
+err() {
+	out=$1
+	shift
+	echo "$@" >&2
+	exit $out
+}
+
+
+usage() {
+    local action=$1
+    
+    if [ -z "$action" ]; then
+	    echo "Usage: `basename $0` cmd
+
+Available cmds:
+ls      - display all stashed patshes
+show    - view a given patch
+save    - save a new patch
+apply   - apply a given patch
+rm      - delete a given patch from the queue
+pop     - apply a patch and delete it
+push    - push patches to a remote site
+sync    - synchornize the stash directory is using a VCS
+help    - show help" >&2
+        return
+    fi
+    
+    #set -x
+    eval echo '${'${action}_usage'}' >&2
+}
+
+export LC_ALL=C
+
+[ -x `which svn` ] || err 1 "svn is not installed on this system"
+svnrp=$(svn info 2>&1 | sed -n 's/Working Copy Root Path: \(.*\)/\1/p')
+[ -d "${svnrp}" ] || err 1 "should be used inside a working copy"
+[ -w "${svnrp}/.svn" ] || err 1 "no write access to ${svnrp}/.svn"
+patchdir=${svnrp}/.svn/patches
+mkdir -p "${patchdir}" || err 1 "Impossible to create the patch directory"
+[ -d ${patchdir}/.svn ] && VCS="svn"
+[ -f ${patchdir}/.fslckout ] && VCS="fossil"
+[ -d ${patchdir}/.git ] && VCS="git"
+[ -d ${patchdir}/.hg ] && VCS="hg"
+
+save_usage="
+Usage: `basename $0` save <name> [-ukf] [files...]\n
+Where:\n
+  name - stash name\n
+  -u   - update stash VCS\n
+  -k   - keep changes without revert\n
+  -f   - force reverting non-versioning files, ignores when -k uses.\n
+"
+save() {
+	[ $# -ge 1 ] || err 1 "Usage: `basename $0` save <name> [-ukf] [files...]"
+	x=`echo $1|head -c1`
+	[ $x != "." ] || err 1 "The patch name must not start with '.'"
+	name=$1
+	patch="${patchdir}/$1.patch"
+	shift
+	while getopts 'ukf' FLAG; do
+		case ${FLAG} in
+		u) update=yes ;;
+		k) keep=yes ;;
+		f) force=yes ;;
+		esac
+	done
+	shift $(( $OPTIND - 1))
+
+	if [ -z "${update}" -a -f "${patch}" ]; then
+		err 1 "A patch named ${name} already exists"
+	fi
+	files="$@"
+	changes=$(svn st -q ${files})
+	[ "${changes}" != "" ] || err 1 "No changes to be saved"
+	svn diff --git ${files:-.} > "${patch}"
+	if [ -z "${keep}" ]; then
+		svn revert --depth=infinity ${files:-.}
+		if [ -n "${force}" ]; then
+		    svn st ${files} | awk '/^?/ { print $2 }' | xargs rm -f
+		fi
+	fi
+	if [ -n "${update}" -a -n "${VCS}" ]; then
+		(cd ${patchdir}; ${VCS} commit)
+	elif [ -n "${VCS}" ]; then
+		(cd ${patchdir}; ${VCS} add ${patch##*/}; ${VCS} commit)
+	fi
+	echo "stashed"
+	exit 0
+}
+
+list() {
+	for p in ${patchdir}/*.patch; do
+		[ "$p" = "${patchdir}/*.patch" ] && break
+		p=${p##*/}
+		echo ${p%.*}
+	done
+	exit 0
+}
+
+show() {
+	[ $# -eq 1 ] || err 1 "Usage: `basename $0` show <name>"
+	patch="${patchdir}/$1.patch"
+	[ -f "${patch}" ] || err 1 "$1: no such patch"
+	less "${patch}"
+	exit 0
+}
+
+
+#
+# Official way to apply patches between revisions
+#
+_apply_heavy() {
+    local patch="${patchdir}/$1.patch"
+	[ -f "${patch}" ] || err 1 "$1: no such patch"
+	cd ${svnrp}	
+	
+	svn patch --dry-run --strip 1 "${patch}"
+    status=$?	
+
+    patch_rev=$(cat $patch | grep '^--- a.\+(revision \([0-9]\+\))' | sed 's|^--- a.\+(revision \([0-9]\+\))$|\1|' | head -n1)
+    work_rev=$(svn info | grep '^Revision:' | awk '{print $2}')
+    
+    # Switch back (forward?) to Patch revision
+    if [ $patch_rev -ne $work_rev ]; then
+        echo "Switch to stashed revision: $patch_rev"
+        svn update -r $patch_rev > /dev/null
+    fi
+
+    # Apply patch
+    svn patch --strip 1 "${patch}"
+    
+    # And switch to work revision back, it helps to solve conflicts in interactive way
+    if [ $patch_rev -ne $work_rev ]; then
+        echo "Pop work revision back: $work_rev"
+        svn update -r $work_rev > /dev/null
+    fi
+}
+
+
+#
+# NOT WORK NOW!
+# But should work for files that changed and uncommitted in work copy.
+#
+_apply_lite() {
+    local patch="${patchdir}/$1.patch"
+	[ -f "${patch}" ] || err 1 "$1: no such patch"
+	cd ${svnrp}	
+	
+	svn patch --dry-run --strip 1 "${patch}"
+
+    patch_rev=$(cat $patch | grep '^--- a.\+(revision \([0-9]\+\))' | sed 's|^--- a.\+(revision \([0-9]\+\))$|\1|' | head -n1)
+    work_rev=$(svn info | grep '^Revision:' | awk '{print $2}')
+    
+    conflicts=$(svn patch --dry-run --strip 1 "${patch}" | grep '^C')
+    
+    if [ -n "$conflicts" ]; then
+    
+        echo "Lite merging..."
+    
+        local files="$(svn patch --dry-run --strip 1 "${patch}" | grep '^[ADUCG]' | awk '{print $2}')"
+        local tmp="$(mktemp -d /tmp/XXXXXXXXXX)"
+        
+        trap "rm -rf '$tmp'" RETURN EXIT
+        
+        echo "Use temp directory: $tmp"
+    
+        repo_url=$(svn info | grep '^URL:' | awk '{print $2}')
+        
+        echo "Repo URL: $repo_url"
+    
+        local CWD=`pwd`
+    
+        # Patch base
+        mkdir -p $tmp/base
+        svn co $repo_url $tmp/base --depth empty
+        cd $tmp/base
+        echo svn up -r $patch_rev $files
+        svn up --depth infinity -r $patch_rev $files
+        
+        
+        exit 0
+        
+        # Apply patch to given files
+        local patch_full="$(realpath ${patch})"
+        cd $tmp
+        cp -a base new
+        cd new
+        svn patch --strip 1 "${patch_full}"
+        
+        # Use external tool for merging
+        cd $CWD
+        for file in $files
+        do
+            bn="$(dirname $file)"
+            out="$tmp/out/$file"
+            
+            mkdir -p "$tmp/out/$bn"
+        
+            kdiff3 -m --auto $tmp/base/$file $tmp/new/$file $file -o $out &&
+                cp $out $file || echo "Skip merging: $file"
+
+        done
+        
+        #rm -rf $tmp
+            
+    else
+        svn patch --strip 1 "${patch}"
+    fi    
+}
+
+#
+# Official way to apply patches between revisions. Lite version.
+#
+_apply_lite2() {
+    local patch="${patchdir}/$1.patch"
+	[ -f "${patch}" ] || err 1 "$1: no such patch"
+	cd ${svnrp}	
+	
+	svn patch --dry-run --strip 1 "${patch}"
+
+    local patch_rev="$(cat $patch | grep '^--- a.\+(revision \([0-9]\+\))' | sed 's|^--- a.\+(revision \([0-9]\+\))$|\1|' | head -n1)"
+    local work_rev="$(svn info | grep '^Revision:' | awk '{print $2}')"
+    local files="$(svn patch --dry-run --strip 1 "${patch}" | grep '^[ADUCG]' | awk '{print $2}')"
+    
+    # Switch back (forward?) to Patch revision
+    if [ $patch_rev -ne $work_rev ]; then
+        echo "Switch to stashed revision: $patch_rev"
+        svn up -r $patch_rev $files
+        #> /dev/null
+    fi
+
+    # Apply patch
+    svn patch --strip 1 "${patch}"
+    
+    # And switch to work revision back, it helps to solve conflicts in interactive way
+    if [ $patch_rev -ne $work_rev ]; then
+        echo "Pop work revision back: $work_rev"
+        svn up -r $work_rev $files 
+        #> /dev/null
+    fi
+}
+
+apply() {
+	[ $# -eq 1 ] || err 1 "Usage: `basename $0` apply <name>"
+	_apply_lite2 "$@"
+	exit 0
+}
+
+remove() {
+	[ $# -eq 1 ] || err 1 "Usage: `basename $0` rm <name>"
+	patch="${patchdir}/$1.patch"
+	[ -f "${patch}" ] || err 1 "$1: no such patch"
+	rm -f "${patch}"
+	if [ -n "${VCS}" ]; then
+		(cd ${patchdir}; ${VCS} rm ${patch##*/}; ${VCS} commit)
+	fi
+	exit 0
+}
+
+pop() {
+	[ $# -eq 1 ] || err 1 "Usage: `basename $0` pop <name>"
+    _apply_lite2 "$@"	
+	remove $1
+	exit 0
+}
+
+push() {
+	[ $# -eq 1 ] || err 1 "Usage: `basename $0` push <name>"
+	patch="${patchdir}/$1.patch"
+	[ -f "${patch}" ] || err 1 "$1: no such patch"
+	cd ${svnrp}
+	scp "${patch}" freefall.freebsd.org:public_html
+	exit 0
+}
+
+sync() {
+	[ -n "${VCS}" ] || err 1 "the stash is not being versioned"
+	cd ${patchdir}
+	case ${VCS} in
+	hg) hg pull -u && hg push ;;
+	git) git pull -r && git push ;;
+	fossil) fossil sync && fossil update ;;
+	svn) svn update ;;
+	esac
+	exit 0
+}
+
+cmd=$1
+[ -n "$1" ] && shift
+
+case "$cmd" in
+ls) list "$@" ;;
+show|save|apply|pop|push|sync|list) $cmd "$@" ;;
+rm) remove "$@" ;;
+*) usage "$@" ;;
+esac

@@ -1,0 +1,17 @@
+#
+# Put this file to the `.svn` directory
+# Perl regexp supported
+#
+
+#
+# Releases binary builds ignore
+#
+^releases/[^/]+/[^/]+/output/.*$
+^releases/[^/]+/[^/]+/configs/.*$
+
+# My CMake wrappers to use with Qt Creator/Clion
+^.cmake
+^cmake.d
+^cmake.sh
+^CMakeLists.txt$
+^CMakeLists.txt.user$

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -e
+
+[ $1 -eq 0 ] && (cd $SVN_ROOT ; touch CMakeLists.txt)
+
