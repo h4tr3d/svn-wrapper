@@ -93,10 +93,17 @@ svn_output_filter()
                 #    ' "$IGNORES" -
                 #fi
 
+                REAL_PATH=n
+                if which realpath > /dev/null; then
+                    REAL_PATH=y
+                fi
+
                 while read line;
                 do
                     fn=`echo $line | tr -s ' ' | cut -d ' ' -f 2-`
-                    fn=`realpath -m --relative-to=$SVN_ROOT -s -q $fn`
+                    if [ "$REAL_PATH" == "y" ]; then
+                        fn=`realpath -m --relative-to=$SVN_ROOT -s -q $fn`
+                    fi
                     echo $fn | grep -f "$IGNORES" > /dev/null || echo "$line"
                 done
 
