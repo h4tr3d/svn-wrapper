@@ -38,7 +38,6 @@ _svnstash ()
             
             # Process arguments and files
             sub="-u $(LANG=C svn st | grep '^[?MA]' | awk '{print $2}')"
-            [ "$act" == "push" ] && sub="-f ${sub}"
             COMPREPLY=($(compgen -W "${sub}" -- "${cur}"))
             return 0
             ;;
