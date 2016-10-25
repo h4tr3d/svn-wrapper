@@ -4,31 +4,6 @@ set -e
 #set -x
 
 #
-# Install:
-# 1. edit the ~/.bashrc file and add a new alias:
-#    alias svn="/path/to/this/file $@"
-#
-# Alt, for deb-based (at least Ubuntu, Mint):
-# 1. edit ~/.bash_aliases instead of ~/.bashrc
-#
-# Supported hooks:
-# * pre-update
-# * post-update <svn_exit_status>
-# * pre-commit
-# * post-commit <svn_exit_status>
-#
-# Hooks directory:
-# .svn/hooks
-#
-# - If pre-hooks returns non-zero status operations will terminates
-# - Post-hooks runs in any case, but first argument is a real SVN return status
-#
-# Env variables:
-#  SVN      - real svn command
-#  SVN_ROOT - root directory of the repository
-#  HOOK_DIR - hook dirs
-
-#
 # Setup real svn
 #
 ME=$(realpath -sm $0)
@@ -66,6 +41,9 @@ run_hooks()
     ;;
     ci|commit)
         run_hook $hook_type-commit "$@"
+    ;;
+    *)
+        run_hook $hook_type-action $action "$@"
     ;;
     esac
 }
