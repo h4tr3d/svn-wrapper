@@ -2,7 +2,7 @@
 
 set -e
 
-err() 
+err()
 {
     out=$1
     shift
@@ -11,12 +11,12 @@ err()
 }
 
 
-usage() 
+usage()
 {
     local action=$1
-    
+
     if [ -z "$action" ]; then
-	    echo "Usage: `basename $0` cmd
+        echo "Usage: `basename $0` cmd
 
 Available cmds:
 ls      - display all stashed patshes
@@ -29,7 +29,7 @@ rm      - delete a given patch from the queue
 help    - show help" >&2
         return
     fi
-    
+
     eval echo '${'${action}_usage'}' >&2
 }
 
@@ -38,7 +38,7 @@ export LC_ALL=C
 [ -x `which svn` ] || err 1 "svn is not installed on this system"
 svnrp=$(svn info 2>&1 | sed -n 's/Working Copy Root Path: \(.*\)/\1/p')
 svnrev=$(svn info 2>&1 | grep '^Revision: ' | cut -d ' ' -f 2)
- 
+
 [ -d "${svnrp}" ] || err 1 "should be used inside a working copy"
 [ -w "${svnrp}/.svn" ] || err 1 "no write access to ${svnrp}/.svn"
 
@@ -78,32 +78,32 @@ _save()
 
     shift
     while getopts 'uk' FLAG; do
-	    case ${FLAG} in
-	        u) update=yes ;;
-	        k) keep=yes ;;
-	    esac
+        case ${FLAG} in
+            u) update=yes ;;
+            k) keep=yes ;;
+        esac
     done
     shift $(( $OPTIND - 1))
 
     if [ -z "${update}" -a -d "${patch}" ]; then
         err 1 "A patch named ${name} already exists, try option -u to force update it."
     fi
-    
+
     updating=0
     if [ -d "${patch}" ]; then
         updating=1
     fi
 
     mkdir -p "${patch}"
-    
+
     files="$@"
 
     if [ -z "${files}" ]; then
         changes=$(svn st -q ${files})
         [ "${changes}" != "" ] || err 1 "No changes to be saved"
-	    st_opt="-q"
+        st_opt="-q"
     fi
-    
+
     diff_list="${patch}/diff.list.tmp"
     revert_list="${patch}/revert.list.tmp"
 
@@ -120,16 +120,16 @@ _save()
         #   Handle binary files here too: `svn diff --git` creates good patch, but `svn patch` can't
         #   apply binary delta 
         if [ "$type" = "?" -o "$enc" = "binary" ]; then
-	        fname=`realpath -m --relative-to="$svnrp" -s -q $file`
-	        fdir=`dirname "${fname}"`
-	        fn=`basename "${fname}"`
-	        mkdir -p "${patch}/others/${fdir}"
-	        cp "${file}" "${patch}/others/${fdir}/"
+            fname=`realpath -m --relative-to="$svnrp" -s -q $file`
+            fdir=`dirname "${fname}"`
+            fn=`basename "${fname}"`
+            mkdir -p "${patch}/others/${fdir}"
+            cp "${file}" "${patch}/others/${fdir}/"
 
-	        echo "${fname}" >> "${others}"
-	        echo "${file}" >> "${revert_list}"
+            echo "${fname}" >> "${others}"
+            echo "${file}" >> "${revert_list}"
         fi
-        
+
         # Separate processing: handle binary files as a diff part too: meta data can be changed
         if [ "$type" != "?" ]; then
             if [ "$enc" = "binary" ]; then
@@ -139,47 +139,47 @@ _save()
                     svn propset svn:mime-type application/octet-stream "${file}"
                 fi
             fi
-        
-	        echo "${file}" >> "${diff_list}"	    
+
+            echo "${file}" >> "${diff_list}"
         fi
     done
 
-    if [ -f "$diff_list" ]; then	   
+    if [ -f "$diff_list" ]; then
         svn diff --git $(cat "$diff_list") > "${diff}"
         cat "$diff_list" >> "$revert_list"
     fi
 
     if [ -f "$revert_list" ]; then
         if [ -z "${keep}" ]; then
-	        svn st $(cat "$revert_list" | sort | uniq) | awk '
-	            /^M/     {print $2}
-	            /^[ M]M/ {print $2}
-	        ' | xargs -I{} svn revert {}
-	        svn st $(cat "$revert_list" | sort | uniq) | awk '
-	            /^?/ {print $2}
-	        ' | xargs -I{} rm -fv {}
+            svn st $(cat "$revert_list" | sort | uniq) | awk '
+            /^M/     {print $2}
+            /^[ M]M/ {print $2}
+            ' | xargs -I{} svn revert {}
+            svn st $(cat "$revert_list" | sort | uniq) | awk '
+            /^?/ {print $2}
+            ' | xargs -I{} rm -fv {}
         fi
-    fi	
-    
+    fi
+
     if [ -n "${VCS}" ]; then
         if [[ $updating == 1 ]]; then
             msg="Update stash '${name}'"
         else
             msg="Create stash '${name}'"
         fi
-    
-	    (cd ${patchdir}; _vcs_${VCS}_update ${name} "${msg}")
+
+        (cd ${patchdir}; _vcs_${VCS}_update ${name} "${msg}")
     fi
-    
+
     echo "stashed"
-    exit 0    
+    exit 0
 }
 
 save_usage="
 Usage: `basename $0` save <name> [-u] [files...]\n
 Where:\n
-  name - stash name\n
-  -u   - update stash\n
+name - stash name\n
+-u   - update stash\n
 "
 save()
 {
@@ -194,10 +194,10 @@ save()
 push_usage="
 Usage: `basename $0` push <name> [-u] [files...]\n
 Where:\n
-  name - stash name\n
-  -u   - update stash\n
+name - stash name\n
+-u   - update stash\n
 "
-push() 
+push()
 {
     [ $# -ge 1 ] || err 1 "$push_usage"
     x=`echo $1|head -c1`
@@ -210,17 +210,17 @@ push()
 list()
 {
     ls -t1 ${patchdir} | while read p; do
-	[ -d ${patchdir}/$p ] && echo $p
-    done | nl | awk '{printf("@{%s}\t%s\n", $1, $2);}'
-    exit 0
+    [ -d ${patchdir}/$p ] && echo $p
+done | nl | awk '{printf("@{%s}\t%s\n", $1, $2);}'
+exit 0
 }
 
 _get_patch()
 {
     patch="$patchdir/$1"
     if [ -d "$patch" ]; then
-	echo $patch
-	return 0
+        echo $patch
+        return 0
     fi
 
     nm=$(list | grep "^$1" | awk '{print $2}')
@@ -241,9 +241,9 @@ show()
         cat "$patch/others.list" | sed 's/^/    /'
         echo
     fi
-    
+
     [ "$patch/changes.diff" ] && cat "${patch}/changes.diff" | colordiff --color=auto
-    
+
     exit 0
 }
 
@@ -252,18 +252,18 @@ show()
 # NOT WORK NOW!
 # Official way to apply patches between revisions
 #
-_apply_heavy() 
+_apply_heavy()
 {
     local patch="$(_get_patch %1)"
     [ -f "${patch}" ] || err 1 "$1: no such patch"
-    cd ${svnrp}	
-	
+    cd ${svnrp}
+
     svn patch --dry-run --strip 1 "${patch}"
-    status=$?	
+    status=$?
 
     patch_rev=$(cat $patch | grep '^--- a.\+(revision \([0-9]\+\))' | sed 's|^--- a.\+(revision \([0-9]\+\))$|\1|' | head -n1)
     work_rev=$(svn info | grep '^Revision:' | awk '{print $2}')
-    
+
     # Switch back (forward?) to Patch revision
     if [ $patch_rev -ne $work_rev ]; then
         echo "Switch to stashed revision: $patch_rev"
@@ -272,7 +272,7 @@ _apply_heavy()
 
     # Apply patch
     svn patch --strip 1 "${patch}"
-    
+
     # And switch to work revision back, it helps to solve conflicts in interactive way
     if [ $patch_rev -ne $work_rev ]; then
         echo "Pop work revision back: $work_rev"
@@ -287,69 +287,69 @@ _apply_heavy()
 #
 _apply_lite() {
     local patch="${patchdir}/$1.patch"
-	[ -f "${patch}" ] || err 1 "$1: no such patch"
-	cd ${svnrp}	
-	
-	svn patch --dry-run --strip 1 "${patch}"
+    [ -f "${patch}" ] || err 1 "$1: no such patch"
+    cd ${svnrp}
+
+    svn patch --dry-run --strip 1 "${patch}"
 
     patch_rev=$(cat $patch | grep '^--- a.\+(revision \([0-9]\+\))' | sed 's|^--- a.\+(revision \([0-9]\+\))$|\1|' | head -n1)
     work_rev=$(svn info | grep '^Revision:' | awk '{print $2}')
-    
+
     conflicts=$(svn patch --dry-run --strip 1 "${patch}" | grep '^C')
-    
+
     if [ -n "$conflicts" ]; then
-    
+
         echo "Lite merging..."
-    
+
         local files="$(svn patch --dry-run --strip 1 "${patch}" | grep '^[ADUCG]' | awk '{print $2}')"
         local tmp="$(mktemp -d /tmp/XXXXXXXXXX)"
-        
+
         trap "rm -rf '$tmp'" RETURN EXIT
-        
+
         echo "Use temp directory: $tmp"
-    
+
         repo_url=$(svn info | grep '^URL:' | awk '{print $2}')
-        
+
         echo "Repo URL: $repo_url"
-    
+
         local CWD=`pwd`
-    
+
         # Patch base
         mkdir -p $tmp/base
         svn co $repo_url $tmp/base --depth empty
         cd $tmp/base
         echo svn up -r $patch_rev $files
         svn up --depth infinity -r $patch_rev $files
-        
-        
+
+
         exit 0
-        
+
         # Apply patch to given files
         local patch_full="$(realpath ${patch})"
         cd $tmp
         cp -a base new
         cd new
         svn patch --strip 1 "${patch_full}"
-        
+
         # Use external tool for merging
         cd $CWD
         for file in $files
         do
             bn="$(dirname $file)"
             out="$tmp/out/$file"
-            
+
             mkdir -p "$tmp/out/$bn"
-        
+
             kdiff3 -m --auto $tmp/base/$file $tmp/new/$file $file -o $out &&
                 cp $out $file || echo "Skip merging: $file"
 
         done
-        
+
         #rm -rf $tmp
-            
+
     else
         svn patch --strip 1 "${patch}"
-    fi    
+    fi
 }
 
 #
@@ -358,19 +358,19 @@ _apply_lite() {
 _apply_lite2() {
     local patch="$(_get_patch $1)"
     [ -d "${patch}" ] || err 1 "$1: no such patch"
-    cd ${svnrp}	
-	
-	local changes others patch_rev work_rev files other_files
-	
-	changes="${patch}/changes.diff"
-	others="${patch}/others.list"
-	
+    cd ${svnrp}
+
+    local changes others patch_rev work_rev files other_files
+
+    changes="${patch}/changes.diff"
+    others="${patch}/others.list"
+
     #svn patch --dry-run --strip ${svnstrip} "${changes}"
 
     patch_rev=$(cat $patch/rev)
     work_rev="$(svn info | grep '^Revision:' | awk '{print $2}')"
     files="$(svn patch --dry-run --strip ${svnstrip} "${changes}" | grep '^[ADUCG]' | awk '{print $2}')"
-    
+
     # Switch back (forward?) to Patch revision
     if [ $patch_rev -ne $work_rev ]; then
         echo "Switch to stashed revision: $patch_rev"
@@ -380,51 +380,51 @@ _apply_lite2() {
 
     # Apply patch
     svn patch --strip ${svnstrip} "${changes}"
-    
+
     # Return back untracked and some other files
     if [ -f "$others" ]; then
         cat "$others" | while read line
-        do
-            cp "$patch/others/$line" "$line"
-        done
-    fi
-    
-    # And switch to work revision back, it helps to solve conflicts in interactive way
-    if [ $patch_rev -ne $work_rev ]; then
-        echo "Pop work revision back: $work_rev"
-        svn up -r $work_rev $files 
-        #> /dev/null
-    fi
+    do
+        cp "$patch/others/$line" "$line"
+    done
+fi
+
+# And switch to work revision back, it helps to solve conflicts in interactive way
+if [ $patch_rev -ne $work_rev ]; then
+    echo "Pop work revision back: $work_rev"
+    svn up -r $work_rev $files
+    #> /dev/null
+fi
 }
 
-apply() 
+apply()
 {
     [ $# -eq 1 ] || err 1 "Usage: `basename $0` apply <name|reference>"
     _apply_lite2 "$@"
     exit 0
 }
 
-pop() 
+pop()
 {
     [ $# -eq 1 ] || err 1 "Usage: `basename $0` pop <name|reference>"
-    _apply_lite2 "$@"	
+    _apply_lite2 "$@"
     remove $1
     exit 0
 }
 
-remove() 
+remove()
 {
     [ $# -eq 1 ] || err 1 "Usage: `basename $0` rm <name|reference>"
     patch=$(_get_patch $1)
     [ -d "${patch}" ] || err 1 "$1: no such patch"
     name=$(basename "${patch}")
     rm -rf "${patch}"
-    
+
     if [ -n "${VCS}" ]; then
         msg="Remove stash '$name'"
-	    (cd ${patchdir}; _vcs_${VCS}_remove ${name} "${msg}")
+        (cd ${patchdir}; _vcs_${VCS}_remove ${name} "${msg}")
     fi
-    
+
     exit 0
 }
 
