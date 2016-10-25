@@ -141,7 +141,7 @@ _save()
 }
 
 save_usage="
-Usage: `basename $0` save <name> [-uf] [files...]\n
+Usage: `basename $0` save <name> [-u] [files...]\n
 Where:\n
   name - stash name\n
   -u   - update stash VCS\n
@@ -160,7 +160,7 @@ list()
 {
     ls -t1 ${patchdir} | while read p; do
 	[ -d ${patchdir}/$p ] && echo $p
-    done | nl | awk '{printf("{%s}\t%s\n", $1, $2);}'
+    done | nl | awk '{printf("@{%s}\t%s\n", $1, $2);}'
     exit 0
 }
 

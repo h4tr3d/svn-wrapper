@@ -1,0 +1,67 @@
+#!/bin/bash
+
+_svnstash ()
+{
+    local cur sub act
+    cur="${COMP_WORDS[COMP_CWORD]}"
+ 
+    if [[ ${COMP_CWORD} == 1 ]]; then
+        _svn "$@"
+        sub="${COMPREPLY[@]} stash"
+        COMPREPLY=($(compgen -W "${sub}" -- ${cur}))
+        return 0
+    fi
+    
+    if [ ${COMP_WORDS[1]} != "stash" ]; then
+        _svn "$@"
+        return 0
+    fi
+    
+    # Second level, stash sub commands
+    if [[ ${COMP_CWORD} == 2 ]]; then
+        sub=$(LANG=C svn stash help 2>&1 | grep -v '^Usage:' | grep ' - ' | cut -d ' ' -f 1)
+        COMPREPLY=($(compgen -W "${sub}" -- ${cur}))
+        return 0
+    fi
+    
+    # Subcommands arguments
+    act=${COMP_WORDS[2]}
+    
+    case "$act" in
+        save|push)
+            # Process possible names
+            if [[ ${COMP_CWORD} == 3 ]]; then
+                sub=$(LANG=C svn stash ls | awk '{print $2}')
+                COMPREPLY=($(compgen -W "${sub}" -- ${cur}))
+                return 0
+            fi
+            
+            # Process arguments and files
+            sub="-u $(LANG=C svn st | grep '^[?MA]' | awk '{print $2}')"
+            [ "$act" == "push" ] && sub="-f ${sub}"
+            COMPREPLY=($(compgen -W "${sub}" -- "${cur}"))
+            return 0
+            ;;
+        apply|pop)
+            # Process possible names
+            if [[ ${COMP_CWORD} == 3 ]]; then
+                sub=$(LANG=C svn stash ls)
+                COMPREPLY=($(compgen -W "${sub}" -- ${cur}))
+                return 0
+            fi
+            ;;
+        show|rm)
+            if [[ ${COMP_CWORD} == 3 ]]; then
+                sub=$(LANG=C svn stash ls)
+                COMPREPLY=($(compgen -W "${sub}" -- ${cur}))
+            fi
+            return 0
+            ;;
+        *)
+            return 0
+            ;;        
+    esac
+}
+
+complete -F _svnstash svn
+
