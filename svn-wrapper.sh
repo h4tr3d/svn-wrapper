@@ -76,22 +76,6 @@ svn_output_filter()
 
             if [ -f "$IGNORES_IN" ]; then
                 cat "$IGNORES_IN" | grep -v '^$' | grep -v '^#' > "$IGNORES"
-                #if false ; then
-                #awk '
-                #    NR==FNR { pats[$0]=1; next }
-                #    {
-                #        found = 0
-                #        for(p in pats) {
-                #            if($2 ~ p) {
-                #                found=1
-                #                break
-                #            }
-                #        }
-                #        if (found == 0)
-                #            print $0
-                #    }
-                #    ' "$IGNORES" -
-                #fi
 
                 REAL_PATH=n
                 if which realpath > /dev/null; then
@@ -100,27 +84,30 @@ svn_output_filter()
 
                 while read line;
                 do
-                    fn=`echo $line | tr -s ' ' | cut -d ' ' -f 2-`
+                    # First 8 columns uses for svn status info: 7 info + 1 for space
+                    # see `svn help st`
+                    fn=`echo $line | cut -c 9-`
                     if [ "$REAL_PATH" == "y" ]; then
                         fn=`realpath -m --relative-to=$SVN_ROOT -s -q $fn`
                     fi
                     echo $fn | grep -f "$IGNORES" > /dev/null || echo "$line"
-                done
+                done | [ -t 1 ] && less -r || cat
+            else
+                cat
+            fi
 
-                rm -f "$IGNORES"
+            rm -f "$IGNORES"
+        ;;
+        diff)
+            if [ -t 1 ]; then
+                (which colordiff > /dev/null 2>&1 && colordiff --color=auto) | less -r
             else
                 cat
             fi
         ;;
-        log)
-            less -R
-        ;;
-        diff)
-            (which colordiff > /dev/null 2>&1 && colordiff --color=auto || cat)
-        ;;
         *)
-            # Default bypass filter
-            cat
+            # Default bypass filter: use pager if output is terminal and cat for pipes and files
+            [ -t 1 ] && less -r || cat
         ;;
     esac
 }
