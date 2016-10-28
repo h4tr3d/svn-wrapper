@@ -125,24 +125,29 @@ run_hooks pre "$action"
 #
 # Modifty command line
 #
+# disable halting on error
 set +e
-shift
+
+[ -n "$1" ] && shift
 ACT_ARGS=""
 modify_args "$action" "$@"
 
 #
 # Real SVN call
 #
-case "$action" in
-    stash)
-        svn-stash "$@" $ACT_ARGS
-        svn_status=$?
-    ;;
-    *)
-        $SVN $action $ACT_ARGS "$@" | svn_output_filter "$action"
-        svn_status=$?
-    ;;
-esac
+
+# detects svn-internal commands
+internal=`LANG=C $SVN help "$action" 2>&1 | grep ': unknown command'`
+external=`which "svn-$action"`
+if [ -z "$internal" -o -z "$external" ]; then
+    [ -z "$internal" ] && $SVN $action $ACT_ARGS "$@" | svn_output_filter "$action" || $SVN $action $ACT_ARGS "$@"
+    svn_status=$?
+else
+    "svn-$action" "$@" $ACT_ARGS
+    svn_status=$?
+fi
+
+# enable halting on error
 set -e
 
 #

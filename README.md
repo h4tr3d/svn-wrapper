@@ -91,10 +91,10 @@ See "Output filtering" section for more details.
 
 ## Output filtering
 
-Allow to setup output filters for various svn commands. Uses for "Local ignores" feature 
+Allow to setup output filters for various svn commands. Uses for "Local ignores" feature
 (see above).
 
-Currently filtering hard to customize, but customization is planed. 
+Currently filtering hard to customize, but customization is planed.
 
 Now next type of filters is supported:
 
@@ -134,6 +134,22 @@ To setup Bash completion for `svn stash`, just include `svn-stash.bash_completio
 or copy to the `/etc/bash_completion.d` and re-login.
 
 ## Command extending
+
+You can add any new svn sub-command by addting external program like:
+
+```
+svn-SUB_COMMAND_NAME
+```
+
+to the PATH.
+
+For example, script "svn-stash" adds new sub-commmand "stash":
+
+```
+svn stash
+```
+
+Simple!
 
 ## Other
 
