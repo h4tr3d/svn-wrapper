@@ -136,9 +136,12 @@ svn_output_filter()
                 cat
             fi
         ;;
-        *)
-            # Default bypass filter: use pager if output is terminal and cat for pipes and files
+        log)
             [ -t 1 ] && less -r || cat
+        ;;
+        *)
+            # Default bypass filter
+            cat
         ;;
     esac
 }
