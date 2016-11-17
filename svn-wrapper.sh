@@ -100,21 +100,29 @@ svn_output_filter()
             if [ -f "$IGNORES_IN" ]; then
                 cat "$IGNORES_IN" | grep -v '^$' | grep -v '^#' > "$IGNORES"
 
-                REAL_PATH=n
+                REAL_PATH="n"
                 if which realpath > /dev/null; then
-                    REAL_PATH=y
+                    REAL_PATH="y"
                 fi
 
                 while read line;
                 do
                     # First 8 columns uses for svn status info: 7 info + 1 for space
                     # see `svn help st`
+                    type=`echo $line | cut -c 1`
                     fn=`echo $line | cut -c 9-`
-                    if [ "$REAL_PATH" == "y" ]; then
-                        fn=`realpath -m --relative-to=$SVN_ROOT -s -q $fn`
+                    # Process only untracked files
+                    if [ "$type" = "?" ]; then
+                        if [ "$REAL_PATH" = "y" ]; then
+                            #set -x
+                            fn=`realpath -m --relative-to="$SVN_ROOT" -s -q "$fn"`
+                            #set +x
+                        fi
+                        echo $fn | grep -f "$IGNORES" > /dev/null || echo "$line"
+                    else
+                        echo "$line"
                     fi
-                    echo $fn | grep -f "$IGNORES" > /dev/null || echo "$line"
-                done | [ -t 1 ] && less -r || cat
+                done
             else
                 cat
             fi
