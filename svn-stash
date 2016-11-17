@@ -44,6 +44,7 @@ svnrev=$(svn info 2>&1 | grep '^Revision: ' | cut -d ' ' -f 2)
 
 patchdir=${svnrp}/.svn/patches
 svnstrip=$(svn info | grep 'Relative URL:' | awk -F: '{print $2}' | xargs | tr -dc / | wc -c)
+svnrelative=$(svn info | grep 'Relative URL:' | awk -F: '{print $2}' | xargs)
 
 mkdir -p "${patchdir}" || err 1 "Impossible to create the patch directory"
 
@@ -68,13 +69,96 @@ _vcs_git_remove()
     git commit --message "$*" --edit --
 }
 
+_history_restore_script()
+{
+    local changes
+    changes="$1"
+
+    cat "${changes}" | grep -A1 '^copy from ' | awk -v rel="${svnrelative}" '
+        BEGIN {
+            from = "";
+            to = "";
+            # Skip "/^"
+            rellen = length(rel) - 2;
+            if (rellen > 0) {
+                rellen += 1; # Skip "/" in future for repos without prefixes
+            }
+        }
+
+        /^copy from / {
+            to="";
+            idx = index($0, "@");
+            from = substr($0, 11 + rellen, idx - rellen - 11);
+        }
+
+        /^copy to /   {
+            to = substr($0, 9 + rellen);
+            if (length(from) > 0) {
+                printf("svn cp \"%s\" \"%s\"\n", from, to);
+                to = "";
+                from = "";
+            }
+        }
+    '
+}
+
+# Fix "svn --git" patch for correct handling changes in moved/copied files
+_fix_svn_git_patch()
+{
+    local changes
+    changes="$1"
+
+    cat "${changes}" | awk '
+        BEGIN {
+            from = "";
+            to = "";
+            start = 0;
+        }
+
+        {
+            if ($0 ~ /^diff --git/) {
+                start = 1;
+            }
+
+            if ($0 ~ /^copy from /) {
+                to="";
+                idx = index($0, "@");
+                from = substr($0, 11, idx - 11);
+            }
+
+            if ($0 ~ /^copy to /) {
+                to = substr($0, 9);
+            }
+
+            if ($0 ~ /^--- / && start == 1) {
+                start = 0;
+                if (length(from) > 0 && length(to) > 0) {
+                    t = $0;
+                    gsub(from, to, t);
+                    print t;
+                } else {
+                    print;
+                }
+                from="";
+                to=""
+            } else {
+                print;
+            }
+        }
+    '
+}
+
 _save()
 {
     name=$1
     patch="${patchdir}/$1"
     diff="${patch}/changes.diff"
+    diff_fixed="${patch}/changes_fixed.diff"
     others="${patch}/others.list"
     rev="${patch}/rev"
+    diff_list="${patch}/diff.list"
+    hist_script="${patch}/hist.script"
+    readme="${patch}/readme.txt"
 
     shift
     while getopts 'uk' FLAG; do
@@ -104,7 +188,6 @@ _save()
         st_opt="-q"
     fi
 
-    diff_list="${patch}/diff.list.tmp"
     revert_list="${patch}/revert.list.tmp"
 
     rm -f "${others}" "${diff_list}" "${revert_list}"
@@ -112,13 +195,24 @@ _save()
     echo ${svnrev} > "${rev}"
     svn st ${st_opt} ${files} | while read line
     do
-        type=`echo "$line" | tr -s ' ' | cut -d ' ' -f 1`
-        file=`echo "$line" | tr -s ' ' | cut -d ' ' -f 2-`
-        enc=`LANG=C file --mime-encoding $file | awk -F: '{print $2}' | xargs`
+        type=`echo "$line" | cut -c 1`
+        hist=`echo "$line" | cut -c 4`
+        file=`echo "$line" | cut -c 9-`
+
+        # Skip:
+        # > moved to
+        # > moved from
+        [ "$type" = ">" ] && continue
+
+        if [ "$type" != "D" ]; then
+            enc=`LANG=C file --mime-encoding "$file" | awk -F: '{print $2}' | xargs`
+        else
+            enc="text"
+        fi
 
         # Other (aka untracked and binary) files:
         #   Handle binary files here too: `svn diff --git` creates good patch, but `svn patch` can't
-        #   apply binary delta 
+        #   apply binary delta
         if [ "$type" = "?" -o "$enc" = "binary" ]; then
             fname=`realpath -m --relative-to="$svnrp" -s -q $file`
             fdir=`dirname "${fname}"`
@@ -146,20 +240,57 @@ _save()
 
     if [ -f "$diff_list" ]; then
         svn diff --git $(cat "$diff_list") > "${diff}"
+        _history_restore_script "${diff}" > "${hist_script}"
+        _fix_svn_git_patch "${diff}" > "${diff_fixed}"
         cat "$diff_list" >> "$revert_list"
     fi
 
     if [ -f "$revert_list" ]; then
         if [ -z "${keep}" ]; then
             svn st $(cat "$revert_list" | sort | uniq) | awk '
-            /^M/     {print $2}
-            /^[ M]M/ {print $2}
+                /^[MAD]/  {print substr($0, 9)}
+                /^[ M]M/  {print substr($0, 9)}
             ' | xargs -I{} svn revert {}
+
             svn st $(cat "$revert_list" | sort | uniq) | awk '
-            /^?/ {print $2}
+                /^[?]/ {print substr($0, 9)}
             ' | xargs -I{} rm -fv {}
         fi
     fi
+
+    cat > "${readme}" << EOF
+This patch-set generaed with svn-stash tool from the svn-wrapper script set:
+  https://github.com/h4tr3d/svn-wrapper
+
+You should apply this set by the 'svn-stash apply NAME' command.
+
+To apply this patch manually, do next steps:
+
+  1. Checkout files from the "diff.list" to the revision from previous step:
+
+      svn up -r \`cat rev\` \`cat diff.list\`
+
+  2. Restore history tracking for copied and movied files. Simple run commands from "hist.script"
+
+  3. Apply patch changes_fixed.diff with appropriate STRIP param, in general - 1:
+
+      svn patch --strip 1 changes_fixed.diff
+
+     Note, changes.diff contains information generated by "svn diff --git" and this file not svn-friendly,
+     so, you must apply changes_fixed.diff instead.
+
+  4. Restore untracked and binary files from the "others/" directory. This directory keeps valid
+     files subpath:
+
+      cat others.list | xargs -I{} | cp others/{} {}
+
+  5. Restore work revision and solve conflicts:
+      svn up
+
+On errors, contact with patch provider.
+
+Enjoy!
+EOF
 
     if [ -n "${VCS}" ]; then
         if [[ $updating == 1 ]]; then
@@ -249,110 +380,6 @@ show()
 
 
 #
-# NOT WORK NOW!
-# Official way to apply patches between revisions
-#
-_apply_heavy()
-{
-    local patch="$(_get_patch %1)"
-    [ -f "${patch}" ] || err 1 "$1: no such patch"
-    cd ${svnrp}
-
-    svn patch --dry-run --strip 1 "${patch}"
-    status=$?
-
-    patch_rev=$(cat $patch | grep '^--- a.\+(revision \([0-9]\+\))' | sed 's|^--- a.\+(revision \([0-9]\+\))$|\1|' | head -n1)
-    work_rev=$(svn info | grep '^Revision:' | awk '{print $2}')
-
-    # Switch back (forward?) to Patch revision
-    if [ $patch_rev -ne $work_rev ]; then
-        echo "Switch to stashed revision: $patch_rev"
-        svn update -r $patch_rev > /dev/null
-    fi
-
-    # Apply patch
-    svn patch --strip 1 "${patch}"
-
-    # And switch to work revision back, it helps to solve conflicts in interactive way
-    if [ $patch_rev -ne $work_rev ]; then
-        echo "Pop work revision back: $work_rev"
-        svn update -r $work_rev > /dev/null
-    fi
-}
-
-
-#
-# NOT WORK NOW!
-# But should work for files that changed and uncommitted in work copy.
-#
-_apply_lite() {
-    local patch="${patchdir}/$1.patch"
-    [ -f "${patch}" ] || err 1 "$1: no such patch"
-    cd ${svnrp}
-
-    svn patch --dry-run --strip 1 "${patch}"
-
-    patch_rev=$(cat $patch | grep '^--- a.\+(revision \([0-9]\+\))' | sed 's|^--- a.\+(revision \([0-9]\+\))$|\1|' | head -n1)
-    work_rev=$(svn info | grep '^Revision:' | awk '{print $2}')
-
-    conflicts=$(svn patch --dry-run --strip 1 "${patch}" | grep '^C')
-
-    if [ -n "$conflicts" ]; then
-
-        echo "Lite merging..."
-
-        local files="$(svn patch --dry-run --strip 1 "${patch}" | grep '^[ADUCG]' | awk '{print $2}')"
-        local tmp="$(mktemp -d /tmp/XXXXXXXXXX)"
-
-        trap "rm -rf '$tmp'" RETURN EXIT
-
-        echo "Use temp directory: $tmp"
-
-        repo_url=$(svn info | grep '^URL:' | awk '{print $2}')
-
-        echo "Repo URL: $repo_url"
-
-        local CWD=`pwd`
-
-        # Patch base
-        mkdir -p $tmp/base
-        svn co $repo_url $tmp/base --depth empty
-        cd $tmp/base
-        echo svn up -r $patch_rev $files
-        svn up --depth infinity -r $patch_rev $files
-
-
-        exit 0
-
-        # Apply patch to given files
-        local patch_full="$(realpath ${patch})"
-        cd $tmp
-        cp -a base new
-        cd new
-        svn patch --strip 1 "${patch_full}"
-
-        # Use external tool for merging
-        cd $CWD
-        for file in $files
-        do
-            bn="$(dirname $file)"
-            out="$tmp/out/$file"
-
-            mkdir -p "$tmp/out/$bn"
-
-            kdiff3 -m --auto $tmp/base/$file $tmp/new/$file $file -o $out &&
-                cp $out $file || echo "Skip merging: $file"
-
-        done
-
-        #rm -rf $tmp
-
-    else
-        svn patch --strip 1 "${patch}"
-    fi
-}
-
-#
 # Official way to apply patches between revisions. Lite version.
 #
 _apply_lite2() {
@@ -360,16 +387,20 @@ _apply_lite2() {
     [ -d "${patch}" ] || err 1 "$1: no such patch"
     cd ${svnrp}
 
-    local changes others patch_rev work_rev files other_files
+    local changes others patch_rev work_rev files other_files diff_list hist_script
 
     changes="${patch}/changes.diff"
     others="${patch}/others.list"
+    diff_list="${patch}/diff.list"
+    hist_script="${patch}/hist.script"
 
     #svn patch --dry-run --strip ${svnstrip} "${changes}"
 
-    patch_rev=$(cat $patch/rev)
+    patch_rev=$(cat "$patch/rev")
     work_rev="$(svn info | grep '^Revision:' | awk '{print $2}')"
-    files="$(svn patch --dry-run --strip ${svnstrip} "${changes}" | grep '^[ADUCG]' | awk '{print $2}')"
+
+    files=""
+    [ -f "${diff_list}" ] && files="$(cat "${diff_list}")"
 
     # Switch back (forward?) to Patch revision
     if [ $patch_rev -ne $work_rev ]; then
@@ -378,23 +409,34 @@ _apply_lite2() {
         #> /dev/null
     fi
 
-    # Apply patch
-    svn patch --strip ${svnstrip} "${changes}"
+    #set -x
+
+    # Restore history: too keep valid tracking for move/copy
+    [ -f "${hist_script}" ] && . "${hist_script}"
+
+    # Apply changes patch
+    if [ -f "${changes}" ]; then
+        fixed="${patch}/fixed_patch.diff.tmp"
+
+        _fix_svn_git_patch "${changes}" > "${fixed}"
+        svn patch --strip ${svnstrip} "${fixed}"
+        rm -f "${fixed}"
+    fi
 
     # Return back untracked and some other files
     if [ -f "$others" ]; then
         cat "$others" | while read line
-    do
-        cp "$patch/others/$line" "$line"
-    done
-fi
+        do
+            cp "$patch/others/$line" "$line"
+        done
+    fi
 
-# And switch to work revision back, it helps to solve conflicts in interactive way
-if [ $patch_rev -ne $work_rev ]; then
-    echo "Pop work revision back: $work_rev"
-    svn up -r $work_rev $files
-    #> /dev/null
-fi
+    # And switch to work revision back, it helps to solve conflicts in interactive way
+    if [ $patch_rev -ne $work_rev ]; then
+        echo "Pop work revision back: $work_rev"
+        svn up -r $work_rev $files
+        #> /dev/null
+    fi
 }
 
 apply()
