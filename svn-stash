@@ -69,6 +69,7 @@ _vcs_git_remove()
     git commit --message "$*" --edit --
 }
 
+# Generate svn commands to restore history tracking for moved/copied files
 _history_restore_script()
 {
     local changes
