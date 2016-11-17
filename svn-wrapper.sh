@@ -4,6 +4,15 @@ set -e
 #set -x
 
 #
+# Global check to terminal or file operation
+#
+if [ -t 1 ]; then
+    export IS_TERMINAL=1
+else
+    export IS_TERMINAL=0
+fi
+
+#
 # Setup real svn
 #
 ME=$(realpath -sm $0)
@@ -53,12 +62,26 @@ modify_args()
     local action=$1
     shift
 
+    local help_mode=0
+    local arg
+    for arg in "$@"
+    do
+        case "$arg" in
+            --help)
+                return 0
+            ;;
+        esac
+    done
+
     case "$action" in
         st|stat|status)
             ACT_ARGS="--ignore-externals"
         ;;
         diff)
-            ACT_ARGS="-x -bpu"
+            local ext
+            # Skip spaces changes only for terminal output
+            [ $IS_TERMINAL -eq 1 ] && ext="bpu" || ext="pu"
+            ACT_ARGS="-x -$ext --internal-diff"
         ;;
     esac
 }
