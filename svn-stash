@@ -167,8 +167,27 @@ _fix_svn_git_patch()
 
 _save()
 {
-    name=$1
-    patch="${patchdir}/$1"
+    while [ -n "$1" ];
+    do
+        case "$1" in
+            -u) update=yes ;;
+            -k) keep=yes ;;
+            -*) die 1 "Unsupported option: $1" ;;
+            *)
+                if [ -z "$name" ]; then
+                    name="$1"
+                else
+                    files="$files "$1""
+                fi
+            ;;
+        esac
+        shift
+    done
+
+    [ -z "$name" ] && die 1 "No stash specified"
+    [ ${name:0:1} = "." ] && err 1 "The stash name must not start with '.'"
+
+    patch="${patchdir}/$name"
     diff="${patch}/changes.diff"
     diff_fixed="${patch}/changes_fixed.diff"
     others="${patch}/others.list"
@@ -176,15 +195,6 @@ _save()
     diff_list="${patch}/diff.list"
     hist_script="${patch}/hist.script"
     readme="${patch}/readme.txt"
-
-    shift
-    while getopts 'uk' FLAG; do
-        case ${FLAG} in
-            u) update=yes ;;
-            k) keep=yes ;;
-        esac
-    done
-    shift $(( $OPTIND - 1))
 
     if [ -z "${update}" -a -d "${patch}" ]; then
         err 1 "A patch named ${name} already exists, try option -u to force update it."
@@ -196,8 +206,6 @@ _save()
     fi
 
     mkdir -p "${patch}"
-
-    files="$@"
 
     if [ -z "${files}" ]; then
         changes=$(svn st -q ${files})
@@ -334,11 +342,7 @@ name - stash name\n
 save()
 {
     [ $# -ge 1 ] || err 1 "$save_usage"
-    x=`echo $1|head -c1`
-    [ $x != "." ] || err 1 "The patch name must not start with '.'"
-    name=$1
-    shift
-    _save $name -k "$@"
+    _save -k "$@"
 }
 
 push_usage="
@@ -350,11 +354,7 @@ name - stash name\n
 push()
 {
     [ $# -ge 1 ] || err 1 "$push_usage"
-    x=`echo $1|head -c1`
-    [ $x != "." ] || err 1 "The patch name must not start with '.'"
-    name=$1
-    shift
-    _save $name "$@"
+    _save "$@"
 }
 
 list()
