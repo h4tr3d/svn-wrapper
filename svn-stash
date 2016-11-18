@@ -609,12 +609,47 @@ log()
     _vcs_${VCS}_log "$short_patch" $full $show_patch "$@"
 }
 
+# Revert files affected by Stash
+revert()
+{
+    [ $# -eq 1 ] || err 1 "Usage: `basename $0` revert <name|number>"
+    patch=$(_get_patch $1)
+    [ -z "$patch" -o -d "${patch}" ] || err 1 "$1: no such patch"
+
+    others="${patch}/others.list"
+    diff_list="${patch}/diff.list"
+    revert_list="${patch}/revert.list.tmp"
+
+    trap "rm -f '$revert_list'" RETURN
+
+    cd ${svnrp}
+
+    local ask
+    read -p "You run revert command. Are you shure? [yes/NO] " ask
+
+    if [ ! "$ask" = "yes" ]; then
+        return 0
+    fi
+
+
+    cat "$others" "$diff_list" 2>/dev/null | sort | uniq > "$revert_list"
+
+    svn st $(cat "$revert_list") | awk '
+        /^[MAD]/  {print substr($0, 9)}
+        /^[ M]M/  {print substr($0, 9)}
+    ' | xargs -I{} svn revert {}
+
+    svn st $(cat "$revert_list") | awk '
+        /^[?]/ {print substr($0, 9)}
+    ' | xargs -I{} rm -fv {}
+}
+
 cmd=$1
 [ -n "$1" ] && shift
 
 case "$cmd" in
     ls) list "$@" ;;
-    show|save|apply|pop|push|list|log) $cmd "$@" ;;
+    show|save|apply|pop|push|list|log|revert) $cmd "$@" ;;
     rm) remove "$@" ;;
     *) usage "$@" ;;
 esac
