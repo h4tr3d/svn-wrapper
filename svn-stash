@@ -69,6 +69,22 @@ _vcs_git_remove()
     git commit --message "$*" --edit --
 }
 
+_vcs_git_log()
+{
+    local name=$1
+    local full=$2
+    local patch=$3
+    shift 3
+
+    format="--oneline"
+    [ "$full" = "yes" ] && format=""
+
+    show_patch=""
+    [ "$patch" = "yes" ] && show_patch="-p"
+
+    git log $format $show_patch "$@" "$name"
+}
+
 # Generate svn commands to restore history tracking for moved/copied files
 _history_restore_script()
 {
@@ -293,6 +309,8 @@ On errors, contact with patch provider.
 Enjoy!
 EOF
 
+    # Disable error exit for VCS
+    set +e
     if [ -n "${VCS}" ]; then
         if [[ $updating == 1 ]]; then
             msg="Update stash '${name}'"
@@ -440,6 +458,17 @@ _apply_lite2() {
     fi
 }
 
+_vcs_apply()
+{
+    local patch="$(_get_patch $1)"
+    [ -d "${patch}" ] || err 1 "$1: no such patch"
+    cd ${svnrp}
+
+
+
+    true
+}
+
 apply()
 {
     [ $# -eq 1 ] || err 1 "Usage: `basename $0` apply <name|reference>"
@@ -471,12 +500,68 @@ remove()
     exit 0
 }
 
+# Show log for VCS tracked stash
+log_usage="
+Usage: `basename $0` log <name> [-f][-p] [-- VCS-specific options]\n
+Where:\n
+name - stash name\n
+-f   - full log, otherwise shoe only headers\n
+-p   - show commit changes\n
+"
+log()
+{
+    if [ -z "${VCS}" ]; then
+        err 1 "You do not use VCS to track stash changes"
+    fi
+
+    full="no"
+    show_patch="no"
+    patch_raw=""
+
+    while [ -n "$1" ];
+    do
+        case "$1" in
+            -f)
+                full="yes"
+            ;;
+            -p)
+                show_patch="yes"
+            ;;
+            --)
+                shift
+                break
+            ;;
+            -*)
+                die 1 "Unsupported option: $1"
+            ;;
+            *)
+                if [ -n "$patch_raw" ]; then
+                    die 1 "Patch already specified to: $patch_raw"
+                fi
+                patch_raw="$1"
+            ;;
+        esac
+        shift
+    done
+
+
+    local patch="$(_get_patch $patch_raw)"
+    [ -d "${patch}" ] || err 1 "$patch_raw: no such patch"
+
+    cd "$patchdir"
+
+    local short_patch=`basename "${patch}"`
+
+
+    _vcs_${VCS}_log "$short_patch" $full $show_patch "$@"
+}
+
 cmd=$1
 [ -n "$1" ] && shift
 
 case "$cmd" in
     ls) list "$@" ;;
-    show|save|apply|pop|push|list) $cmd "$@" ;;
+    show|save|apply|pop|push|list|log) $cmd "$@" ;;
     rm) remove "$@" ;;
     *) usage "$@" ;;
 esac
