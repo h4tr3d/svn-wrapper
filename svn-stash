@@ -193,6 +193,18 @@ _fix_svn_git_patch()
     '
 }
 
+_sort_list()
+{
+    local list="$1"
+
+    if [ -f "$list" ]; then
+        tmp=`mktemp /tmp/XXXXXXXXXX`
+        trap "rm -f $tmp" RETURN
+        cat "$list" | sort | uniq > "$tmp"
+        mv "$tmp" "$list"
+    fi
+}
+
 _save()
 {
     while [ -n "$1" ];
@@ -223,6 +235,7 @@ _save()
     diff_list="${patch}/diff.list"
     hist_script="${patch}/hist.script"
     readme="${patch}/readme.txt"
+    tmp_list="${patch}/list.tmp"
 
     if [ -z "${update}" -a -d "${patch}" ]; then
         err 1 "A patch named ${name} already exists, try option -u to force update it."
@@ -291,6 +304,11 @@ _save()
         fi
     done
 
+    # Sort lists
+    _sort_list "${diff_list}"
+    _sort_list "${others}"
+
+    # Process lists
     if [ -f "$diff_list" ]; then
         svn diff --git $(cat "$diff_list") > "${diff}"
         _history_restore_script "${diff}" > "${hist_script}"
