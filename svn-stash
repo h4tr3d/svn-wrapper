@@ -26,6 +26,8 @@ apply   - apply a given patch without deleting it
 push    - save a new patch or update existing one and revert files
 pop     - apply a patch and delete it
 rm      - delete a given patch from the queue
+log     - show history for VCSes stashes
+revert  - revert files owned by given stash
 help    - show help" >&2
         return
     fi
