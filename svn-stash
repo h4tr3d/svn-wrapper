@@ -69,6 +69,10 @@ _vcs_git_remove()
     git commit --message "$*" --edit --
 }
 
+# $1 - stash name
+# $2 - full flag: yes/no
+# $3 - show patch flag: yes/no
+# $@ - options to bypass to VCS
 _vcs_git_log()
 {
     local name=$1
@@ -82,7 +86,29 @@ _vcs_git_log()
     show_patch=""
     [ "$patch" = "yes" ] && show_patch="-p"
 
-    git log $format $show_patch "$@" "$name"
+    if [ -n "$name" ]; then
+        git log $format $show_patch "$@" "$name"
+    else
+        git log $format $show_patch "$@"
+    fi
+}
+
+# $1 - stash name
+# $2 - temporary directory
+# $3 - revision
+_vcs_git_get_rev()
+{
+    local name=$1
+    local tmp=$2
+    local rev=$3
+    shift 3
+
+    local branch="${name}__"
+
+    git checkout -b ${branch} $rev
+    cp -a "$name" "$tmp"
+    git checkout master
+    git branch -D ${branch}
 }
 
 # Generate svn commands to restore history tracking for moved/copied files
@@ -402,7 +428,7 @@ show()
 # Official way to apply patches between revisions. Lite version.
 #
 _apply_lite2() {
-    local patch="$(_get_patch $1)"
+    local patch="$1"
     [ -d "${patch}" ] || err 1 "$1: no such patch"
     cd ${svnrp}
 
@@ -427,8 +453,6 @@ _apply_lite2() {
         svn up -r $patch_rev $files
         #> /dev/null
     fi
-
-    #set -x
 
     # Restore history: too keep valid tracking for move/copy
     [ -f "${hist_script}" ] && . "${hist_script}"
@@ -458,28 +482,57 @@ _apply_lite2() {
     fi
 }
 
+# Apply given revision of the patch, works only when Name provided
 _vcs_apply()
 {
-    local patch="$(_get_patch $1)"
-    [ -d "${patch}" ] || err 1 "$1: no such patch"
+    #set -x
+
+    # Check for reference
+    is_ref=`echo "$1" | grep '^@{[0-9]\+}$' || true`
+    if [ -z "$is_ref" ]; then
+        # Cut @ from name
+        name=`echo "$1" | cut -d '@' -f 1`
+        revision=`echo "$1" | cut -d '@' -f 2`
+    else
+        name="$1"
+        revision=""
+    fi
+
+    local patch="$(_get_patch $name)"
+    [ -d "${patch}" ] || err 1 "$name: no such patch"
+
     cd ${svnrp}
 
+    shift
 
+    if [ -n "$is_ref" -o -z "$revision" -o -z "${VCS}" ]; then
+        _apply_lite2 "$patch" "$@"
+        return 0
+    fi
 
-    true
+    # Process VCS
+    local tmp=`mktemp -d /tmp/XXXXXXXXXXX`
+    local short=`basename "${patch}"`
+    trap "rm -rf '$tmp'" RETURN
+    (
+        cd "${patchdir}"
+        _vcs_git_get_rev $short "$tmp" $revision
+    )
+
+    _apply_lite2 "$tmp/$short" "$@"
 }
 
 apply()
 {
-    [ $# -eq 1 ] || err 1 "Usage: `basename $0` apply <name|reference>"
-    _apply_lite2 "$@"
+    [ $# -eq 1 ] || err 1 "Usage: `basename $0` apply <name[@REV]|reference>"
+    _vcs_apply "$@"
     exit 0
 }
 
 pop()
 {
-    [ $# -eq 1 ] || err 1 "Usage: `basename $0` pop <name|reference>"
-    _apply_lite2 "$@"
+    [ $# -eq 1 ] || err 1 "Usage: `basename $0` pop <name[@REV]|reference>"
+    _vcs_apply "$@"
     remove $1
     exit 0
 }
@@ -544,14 +597,14 @@ log()
         shift
     done
 
-
-    local patch="$(_get_patch $patch_raw)"
-    [ -d "${patch}" ] || err 1 "$patch_raw: no such patch"
+    local short_patch=""
+    if [ -n "$patch_raw" ]; then
+        local patch="$(_get_patch $patch_raw)"
+        [ -d "${patch}" ] || err 1 "$patch_raw: no such patch"
+        short_patch=`basename "${patch}"`
+    fi
 
     cd "$patchdir"
-
-    local short_patch=`basename "${patch}"`
-
 
     _vcs_${VCS}_log "$short_patch" $full $show_patch "$@"
 }
