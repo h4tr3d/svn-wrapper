@@ -131,7 +131,7 @@ svn_output_filter()
         ;;
         diff)
             if [ -t 1 ]; then
-                (which colordiff > /dev/null 2>&1 && colordiff --color=auto) | less -r
+                (which colordiff > /dev/null 2>&1 && colordiff --color=auto || cat) | less -r
             else
                 cat
             fi
@@ -172,7 +172,7 @@ modify_args "$action" "$@"
 
 # detects svn-internal commands
 internal=`LANG=C $SVN help "$action" 2>&1 | grep ': unknown command'`
-external=`which "svn-$action"`
+external=`which "svn-$action" 2>/dev/null`
 if [ -z "$internal" -o -z "$external" ]; then
     [ -z "$internal" ] && $SVN $action $ACT_ARGS "$@" | svn_output_filter "$action" || $SVN $action $ACT_ARGS "$@"
     svn_status=$?
