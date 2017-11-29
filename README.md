@@ -29,6 +29,8 @@ PATH, for example: link it to `/usr/local/bin`:
 sudo ln -s /path/to/svn-stash /usr/local/bin
 ```
 
+To use advanced coloring move (or make symlink) svn-color-filter.py to the PATH.
+
 Dependency:
 
 1. *colordiff* (optional) - if found, `svn diff` will be use it and colorize diff output.

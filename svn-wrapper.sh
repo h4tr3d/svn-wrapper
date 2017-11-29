@@ -29,6 +29,11 @@ export SVN_ROOT=$(env LANG=C $SVN info | grep 'Root Path:' | awk -F: '{print $2}
 export HOOK_DIR="$SVN_ROOT/.svn/hooks"
 
 #
+# PAGER like git
+#
+SVN_PAGER="less -FRSX"
+
+#
 # Helpers
 #
 run_hook()
@@ -87,6 +92,29 @@ modify_args()
 }
 
 # Filter SVN output. Helps to implement "local ignores"
+#set -x
+svn_output_colorer()
+{
+    local CMD=$1
+    if [ -t 1 ]; then
+        (
+            case $CMD in
+                diff|di)
+                    (which colordiff > /dev/null 2>&1 && colordiff --color=auto || cat)
+                ;;
+                log)
+                    sed -e 's/^\(.*\)|\(.*\)| \(.*\) \(.*\):[0-9]\{2\} \(.*\) (\(...\).*) |\(.*\)$/\o33\[1;32m\1\o33[0m|\o33\[1;34m\2\o33[0m| \o33\[1;35m\3 \4 (\6, \5)\o33[0m |\7/'
+                ;;
+                *)
+                    (which svn-color-filter.py > /dev/null 2>&1 && svn-color-filter.py $CMD || cat)
+                ;;
+            esac
+        ) | $SVN_PAGER
+    else
+        cat
+    fi
+}
+
 svn_output_filter()
 {
     local action=$1
@@ -97,6 +125,7 @@ svn_output_filter()
             local IGNORES_IN="$SVN_ROOT/.svn/ignores.txt"
             local IGNORES=`mktemp /tmp/XXXXXXXX`
 
+            (
             if [ -f "$IGNORES_IN" ]; then
                 cat "$IGNORES_IN" | grep -v '^$' | grep -v '^#' > "$IGNORES"
 
@@ -126,18 +155,12 @@ svn_output_filter()
             else
                 cat
             fi
+            ) | svn_output_colorer status
 
             rm -f "$IGNORES"
         ;;
-        diff)
-            if [ -t 1 ]; then
-                (which colordiff > /dev/null 2>&1 && colordiff --color=auto || cat) | less -r
-            else
-                cat
-            fi
-        ;;
-        log)
-            [ -t 1 ] && less -r || cat
+        diff|log|remove|add|help)
+            svn_output_colorer $action
         ;;
         *)
             # Default bypass filter
