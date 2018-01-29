@@ -469,9 +469,6 @@ _apply_lite2() {
     hist_script="${patch}/hist.script"
     path_file="${patch}/path"
 
-    pwd
-    set -x
-
     if [ -f "${path_file}" ]; then
         cd "$(cat ${path_file})"
     fi
