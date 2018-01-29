@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 
 set -e
@@ -194,11 +195,24 @@ modify_args "$action" "$@"
 #
 
 # detects svn-internal commands
-internal=`LANG=C $SVN help "$action" 2>&1 | grep ': unknown command'`
-external=`which "svn-$action" 2>/dev/null`
-if [ -z "$internal" -o -z "$external" ]; then
-    [ -z "$internal" ] && $SVN $action $ACT_ARGS "$@" | svn_output_filter "$action" || $SVN $action $ACT_ARGS "$@"
-    svn_status=$?
+non_internal=`LANG=C $SVN help "$action" 2>&1 | grep ': unknown command'`
+non_external=`which "svn-$action" 2>/dev/null`
+if [ -z "$non_internal" -o -z "$non_external" ]; then
+    if [ -z "$non_internal" ]; then
+        case "$action" in
+            merge|co|checkout|cp|copy|ci|commit|switch|info|propedit|cleanup)
+                $SVN $action $ACT_ARGS "$@"
+                svn_status=$?
+            ;;
+            *)
+                $SVN $action $ACT_ARGS "$@" | svn_output_filter "$action"
+                svn_status=$?
+            ;;
+        esac
+    else
+        $SVN $action $ACT_ARGS "$@"
+        svn_status=$?
+    fi
 else
     "svn-$action" "$@" $ACT_ARGS
     svn_status=$?
