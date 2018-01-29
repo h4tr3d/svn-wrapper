@@ -45,7 +45,7 @@ svnrev=$(svn info 2>&1 | grep '^Revision: ' | cut -d ' ' -f 2)
 [ -w "${svnrp}/.svn" ] || err 1 "no write access to ${svnrp}/.svn"
 
 patchdir=${svnrp}/.svn/patches
-svnstrip=$(svn info | grep 'Relative URL:' | awk -F: '{print $2}' | xargs | tr -dc / | wc -c)
+#svnstrip=$(svn info | grep 'Relative URL:' | awk -F: '{print $2}' | xargs | tr -dc / | wc -c)
 svnrelative=$(svn info | grep 'Relative URL:' | awk -F: '{print $2}' | xargs)
 
 mkdir -p "${patchdir}" || err 1 "Impossible to create the patch directory"
@@ -54,6 +54,11 @@ mkdir -p "${patchdir}" || err 1 "Impossible to create the patch directory"
 #[ -f ${patchdir}/.fslckout ] && VCS="fossil"
 [ -d ${patchdir}/.git ] && VCS="git"
 #[ -d ${patchdir}/.hg ] && VCS="hg"
+
+_svn_strip_count()
+{
+    svn info | grep 'Relative URL:' | awk -F: '{print $2}' | xargs | tr -dc / | wc -c
+}
 
 _vcs_git_update()
 {
@@ -236,6 +241,7 @@ _save()
     hist_script="${patch}/hist.script"
     readme="${patch}/readme.txt"
     tmp_list="${patch}/list.tmp"
+    path_file="${patch}/path"
 
     if [ -z "${update}" -a -d "${patch}" ]; then
         err 1 "A patch named ${name} already exists, try option -u to force update it."
@@ -247,6 +253,9 @@ _save()
     fi
 
     mkdir -p "${patch}"
+
+    # Keep local relative path
+    realpath --relative-to="${svnrp}" "$(pwd)" > "${path_file}"
 
     if [ -z "${files}" ]; then
         changes=$(svn st -q ${files})
@@ -452,12 +461,22 @@ _apply_lite2() {
     [ -d "${patch}" ] || err 1 "$1: no such patch"
     cd ${svnrp}
 
-    local changes others patch_rev work_rev files other_files diff_list hist_script
+    local changes others patch_rev work_rev files other_files diff_list hist_script path_file svnstrip
 
     changes="${patch}/changes.diff"
     others="${patch}/others.list"
     diff_list="${patch}/diff.list"
     hist_script="${patch}/hist.script"
+    path_file="${patch}/path"
+
+    pwd
+    set -x
+
+    if [ -f "${path_file}" ]; then
+        cd "$(cat ${path_file})"
+    fi
+
+    svnstrip=$(_svn_strip_count)
 
     #svn patch --dry-run --strip ${svnstrip} "${changes}"
 
