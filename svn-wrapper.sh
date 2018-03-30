@@ -25,6 +25,11 @@ export SVN=$(which -a svn | grep -v "\\$ME" | head -n1)
 export SVN_ROOT=$(env LANG=C $SVN info | grep 'Root Path:' | awk -F: '{print $2}' | xargs)
 
 #
+# Setup SVN repository root path
+#
+export SVN_REPO_ROOT=$(env LANG=C $SVN info | grep 'Repository Root:' | awk '{print $3}' | xargs)
+
+#
 # Hook dirs
 #
 export HOOK_DIR="$SVN_ROOT/.svn/hooks"
@@ -35,8 +40,21 @@ export HOOK_DIR="$SVN_ROOT/.svn/hooks"
 SVN_PAGER="less -FRSX"
 
 #
+# Action arguments
+#
+declare -a ACT_ARGS
+declare -a CMD_LINE
+
+#
 # Helpers
 #
+
+svn_info_field()
+{
+    local field="$1"
+    env LANG=C $SVN info | grep "^$field:" | sed "s|^$field: ||"
+}
+
 run_hook()
 {
     local hook=$1
@@ -48,6 +66,7 @@ run_hooks()
 {
     local hook_type=$1
     local action=$2
+    local status=$3
     shift 2
 
     case "$action" in
@@ -57,10 +76,45 @@ run_hooks()
     ci|commit)
         run_hook $hook_type-commit "$@"
     ;;
+    switch)
+        #set -x
+        # Collect branches
+        if [ x"$hook_type" = x"post" -a x"$status"  = x"0" ]; then
+            local svn_branch
+            for arg in $CMD_LINE
+            do
+                if [ ${arg:0:1} != "-" ]; then
+                    svn_branch=${arg}
+                    break
+                fi
+            done
+            
+            if [ -n "${svn_branch}" ]; then
+                local current_branch=$(svn_info_field 'Relative URL')
+                local svn_repo_hash=$(sha256sum <<< "$SVN_REPO_ROOT" | awk '{print $1}')
+                local branches_file="$HOME/.subversion/branches-${svn_repo_hash}.txt"
+                
+                [ -f "${branches_file}" ] && cp "${branches_file}" "${branches_file}.tmp"
+                echo "${current_brach}" >> "${branches_file}.tmp"
+                echo "${svn_branch}" >> "${branches_file}.tmp"
+                cat "${branches_file}.tmp" | grep -v '^$' | sort | uniq > "${branches_file}"
+                rm "${branches_file}.tmp"
+            fi
+        fi
+        #set +x
+    ;;
     *)
         run_hook $hook_type-action $action "$@"
     ;;
     esac
+}
+
+svn_list_branches()
+{
+    local svn_repo_hash=$(sha256sum <<< "$SVN_REPO_ROOT" | awk '{print $1}')
+    local branches_file="$HOME/.subversion/branches-${svn_repo_hash}.txt"
+    
+    [ -f "${branches_file}" ] && cat "${branches_file}"
 }
 
 modify_args()
@@ -81,13 +135,13 @@ modify_args()
 
     case "$action" in
         st|stat|status)
-            ACT_ARGS="--ignore-externals"
+            ACT_ARGS[${#ACT_ARGS[*]}]="--ignore-externals"
         ;;
         diff)
             local ext
             # Skip spaces changes only for terminal output
             [ $IS_TERMINAL -eq 1 ] && ext="bpu" || ext="pu"
-            ACT_ARGS="-x -$ext --internal-diff"
+            ACT_ARGS=( "${ACT_ARGS[@]}" "-x" "-$ext" "--internal-diff" )
         ;;
     esac
 }
@@ -187,12 +241,16 @@ run_hooks pre "$action"
 set +e
 
 [ -n "$1" ] && shift
-ACT_ARGS=""
 modify_args "$action" "$@"
+
+CMD_LINE=( "${CMD_LINE[@]}" "$@" )
+#declare -p CMD_LINE
 
 #
 # Real SVN call
 #
+
+#set -x
 
 # detects svn-internal commands
 non_internal=`LANG=C $SVN help "$action" 2>&1 | grep ': unknown command'`
@@ -201,20 +259,28 @@ if [ -z "$non_internal" -o -z "$non_external" ]; then
     if [ -z "$non_internal" ]; then
         case "$action" in
             merge|co|checkout|cp|copy|ci|commit|switch|info|propedit|cleanup)
-                $SVN $action $ACT_ARGS "$@"
+                $SVN $action "${ACT_ARGS[@]}" "$@"
                 svn_status=$?
             ;;
             *)
-                $SVN $action $ACT_ARGS "$@" | svn_output_filter "$action"
+                $SVN $action "${ACT_ARGS[@]}" "$@" | svn_output_filter "$action"
                 svn_status=$?
             ;;
         esac
     else
-        $SVN $action $ACT_ARGS "$@"
-        svn_status=$?
+        case "$action" in
+            branch|br)
+                svn_list_branches
+                svn_status=$?
+            ;;
+            *)
+                $SVN $action "${ACT_ARGS[@]}" "$@"
+                svn_status=$?
+            ;;
+        esac
     fi
 else
-    "svn-$action" "$@" $ACT_ARGS
+    "svn-$action" "$@" "${ACT_ARGS[@]}"
     svn_status=$?
 fi
 
@@ -227,3 +293,4 @@ set -e
 run_hooks post "$action" $svn_status
 
 exit $svn_status
+
