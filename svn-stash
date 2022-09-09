@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -e
+#set -x
 
 err()
 {
@@ -258,7 +259,7 @@ _save()
     realpath --relative-to="${svnrp}" "$(pwd)" > "${path_file}"
 
     if [ -z "${files}" ]; then
-        changes=$(svn st -q ${files})
+        changes=$(svn st -q ${files} | grep -v '^--- Changelist' | cut -c 1-8 | sort | uniq | sed 's| ||g')
         [ "${changes}" != "" ] || err 1 "No changes to be saved"
         st_opt="-q"
     fi
@@ -268,7 +269,7 @@ _save()
     rm -f "${others}" "${diff_list}" "${revert_list}"
 
     echo ${svnrev} > "${rev}"
-    svn st ${st_opt} ${files} | while read line
+    svn st ${st_opt} ${files} | grep -v '^--- Changelist' | while read line
     do
         type=`echo "$line" | cut -c 1`
         hist=`echo "$line" | cut -c 4`
@@ -327,12 +328,12 @@ _save()
 
     if [ -f "$revert_list" ]; then
         if [ -z "${keep}" ]; then
-            svn st $(cat "$revert_list" | sort | uniq) | awk '
+            svn st $(cat "$revert_list" | sort | uniq) | grep -v '^--- Changelist' | awk '
                 /^[MAD]/  {print substr($0, 9)}
                 /^[ M]M/  {print substr($0, 9)}
             ' | xargs -I{} svn revert {}
 
-            svn st $(cat "$revert_list" | sort | uniq) | awk '
+            svn st $(cat "$revert_list" | sort | uniq) | grep -v '^--- Changelist' | awk '
                 /^[?]/ {print substr($0, 9)}
             ' | xargs -I{} rm -fv {}
         fi
@@ -673,12 +674,12 @@ revert()
 
     cat "$others" "$diff_list" 2>/dev/null | sort | uniq > "$revert_list"
 
-    svn st $(cat "$revert_list") | awk '
+    svn st $(cat "$revert_list") | grep -v '^--- Changelist' | awk '
         /^[MAD]/  {print substr($0, 9)}
         /^[ M]M/  {print substr($0, 9)}
     ' | xargs -I{} svn revert {}
 
-    svn st $(cat "$revert_list") | awk '
+    svn st $(cat "$revert_list") | grep -v '^--- Changelist' | awk '
         /^[?]/ {print substr($0, 9)}
     ' | xargs -I{} rm -fv {}
 }
